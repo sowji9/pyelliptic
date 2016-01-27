@@ -30,7 +30,7 @@
 # IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .openssl import OpenSSL
-
+import hashlib
 
 # For python3
 def _equals_bytes(a, b):
@@ -58,7 +58,7 @@ def equals(a, b):
         return _equals_bytes(a, b)
 
 
-def hmac_sha256(k, m):
+def hmac_sha256(k, m, tBits=256):
     """
     Compute the key and the message with HMAC SHA5256
     """
@@ -67,7 +67,12 @@ def hmac_sha256(k, m):
     md = OpenSSL.malloc(0, 32)
     i = OpenSSL.pointer(OpenSSL.c_int(0))
     OpenSSL.HMAC(OpenSSL.EVP_sha256(), key, len(k), d, len(m), md, i)
-    return md.raw
+    if tBits == 160:
+        ripemd160 = hashlib.new('ripemd160')
+        ripemd160.update(md.raw)
+        return ripemd160.digest()
+    else:
+        return md.raw
 
 
 def hmac_sha512(k, m):
