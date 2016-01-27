@@ -29,12 +29,14 @@
 # OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
 # IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from hashlib import sha512
+from hashlib import sha512, sha256, sha224
 from binascii import hexlify, unhexlify
 from .openssl import OpenSSL
 from .cipher import Cipher
 from .hash import hmac_sha256, equals
+from .arithmetic import hash_160
 from struct import pack, unpack
+from math import ceil
 
 
 class ECC:
@@ -68,7 +70,7 @@ class ECC:
     """
 
     def __init__(self, pubkey=None, privkey=None, pubkey_x=None,
-                 pubkey_y=None, raw_privkey=None, curve='sect283r1'):
+                 pubkey_y=None, raw_privkey=None, curve='sect283r1', hash='sha512'):
         """
         For a normal and High level use, specifie pubkey,
         privkey (if you need) and the curve
@@ -77,6 +79,11 @@ class ECC:
             self.curve = OpenSSL.get_curve(curve)
         else:
             self.curve = curve
+
+        if type(hash) == str:
+            self.hash = globals()[hash]
+        else:
+            self.hash = hash
 
         if pubkey_x is not None and pubkey_y is not None:
             self._set_keys(pubkey_x, pubkey_y, raw_privkey)
@@ -211,6 +218,120 @@ class ECC:
         i += tmplen
         return curve, privkey, i
 
+    @staticmethod
+    def point_add(curve, p1_x, p1_y, p2_x, p2_y):
+        try:
+            p1_x = OpenSSL.BN_bin2bn(p1_x, len(p1_x), 0)
+            p1_y = OpenSSL.BN_bin2bn(p1_y, len(p1_y), 0)
+            p2_x = OpenSSL.BN_bin2bn(p2_x, len(p2_x), 0)
+            p2_y = OpenSSL.BN_bin2bn(p2_y, len(p2_y), 0)
+            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
+            if group == 0:
+                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
+
+            r = OpenSSL.EC_POINT_new(group)
+            a = OpenSSL.EC_POINT_new(group)
+            b = OpenSSL.EC_POINT_new(group)
+            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, a, p1_x, p1_y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
+            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, b, p2_x, p2_y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
+
+            OpenSSL.EC_POINT_add(group, r, a, b, 0)
+            x = OpenSSL.BN_new()
+            y = OpenSSL.BN_new()
+            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, r, x, y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+            x_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(x))
+            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
+            OpenSSL.BN_bn2bin(x, x_bin)
+            OpenSSL.BN_bn2bin(y, y_bin)
+            return x_bin.raw, y_bin.raw
+
+        finally:
+            OpenSSL.EC_KEY_free(key)
+            OpenSSL.EC_POINT_free(r)
+            OpenSSL.EC_POINT_free(a)
+            OpenSSL.EC_POINT_free(b)
+            OpenSSL.BN_free(x)
+            OpenSSL.BN_free(y)
+
+    @staticmethod
+    def point_mul(curve, n, point_x, point_y):
+        try:
+            m = OpenSSL.BN_new()
+            OpenSSL.BN_dec2bn(OpenSSL.byref(OpenSSL.pointer(m)), str(n))
+
+            point_x = OpenSSL.BN_bin2bn(point_x, len(point_x), 0)
+            point_y = OpenSSL.BN_bin2bn(point_y, len(point_y), 0)
+
+            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
+            if group == 0:
+                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
+
+            r = OpenSSL.EC_POINT_new(group)
+            q = OpenSSL.EC_POINT_new(group)
+            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, q, point_x, point_y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
+
+            OpenSSL.EC_POINT_mul(group, r, 0, q, m, 0)
+            x = OpenSSL.BN_new()
+            y = OpenSSL.BN_new()
+            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, r, x, y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+            x_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(x))
+            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
+            OpenSSL.BN_bn2bin(x, x_bin)
+            OpenSSL.BN_bn2bin(y, y_bin)
+            return x_bin.raw, y_bin.raw
+
+        finally:
+            OpenSSL.EC_GROUP_free(group)
+            OpenSSL.EC_POINT_free(r)
+            OpenSSL.EC_POINT_free(q)
+            OpenSSL.BN_free(m)
+            OpenSSL.BN_free(x)
+            OpenSSL.BN_free(y)
+
+    @staticmethod
+    def uncompress_ecpoint(curve, x, y_lsb):
+        """
+        Derives y coordinate of a compressed ec point using x and y_lsb
+        """
+        try:
+            x = OpenSSL.BN_bin2bn(x, len(x), 0)
+            y = OpenSSL.BN_new()
+
+            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
+            if group == 0:
+                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
+
+            pub_key = OpenSSL.EC_POINT_new(group)
+            if (OpenSSL.EC_POINT_set_compressed_coordinates_GFp(group, pub_key,
+                                                                x, y_lsb, 0)) == 0:
+                    raise Exception(
+                        "[OpenSSL] EC_POINT_set_compressed_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, pub_key,
+                                                                x, y, 0)) == 0:
+                    raise Exception(
+                        "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+
+            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
+            OpenSSL.BN_bn2bin(y, y_bin)
+
+            return y_bin.raw
+
+        finally:
+            OpenSSL.EC_GROUP_free(group)
+            OpenSSL.EC_POINT_free(pub_key)
+            OpenSSL.BN_free(x)
+            OpenSSL.BN_free(y)
+
     def _generate(self):
         try:
             pub_key_x = OpenSSL.BN_new()
@@ -262,7 +383,7 @@ class ECC:
             OpenSSL.BN_free(pub_key_x)
             OpenSSL.BN_free(pub_key_y)
 
-    def get_ecdh_key(self, pubkey, format='binary'):
+    def get_ecdh_key(self, pubkey, kdf, format='binary'):
         """
         High level function. Compute public key with the local private key
         and returns a shared binary key
@@ -375,7 +496,7 @@ class ECC:
             if privkey is not None:
                 OpenSSL.BN_free(priv_key)
 
-    def sign(self, inputb):
+    def sign(self, inputb, der=1):
         """
         Sign the input with ECDSA method and returns the signature
         """
@@ -408,23 +529,40 @@ class ECC:
                                                             0)) == 0:
                 raise Exception(
                     "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+
             if (OpenSSL.EC_KEY_set_public_key(key, pub_key)) == 0:
                 raise Exception("[OpenSSL] EC_KEY_set_public_key FAIL ... " + OpenSSL.get_error())
             if (OpenSSL.EC_KEY_check_key(key)) == 0:
                 raise Exception("[OpenSSL] EC_KEY_check_key FAIL ... " + OpenSSL.get_error())
 
             OpenSSL.EVP_MD_CTX_init(md_ctx)
-            OpenSSL.EVP_DigestInit_ex(md_ctx, OpenSSL.EVP_sha256(), None)
+            if self.hash == sha224:
+                OpenSSL.EVP_DigestInit_ex(md_ctx, OpenSSL.EVP_sha224(), None)
+            if self.hash == sha256:
+                OpenSSL.EVP_DigestInit_ex(md_ctx, OpenSSL.EVP_sha256(), None)
 
             if (OpenSSL.EVP_DigestUpdate(md_ctx, buff, size)) == 0:
                 raise Exception("[OpenSSL] EVP_DigestUpdate FAIL ... " + OpenSSL.get_error())
             OpenSSL.EVP_DigestFinal_ex(md_ctx, digest, dgst_len)
-            OpenSSL.ECDSA_sign(0, digest, dgst_len.contents, sig, siglen, key)
-            if (OpenSSL.ECDSA_verify(0, digest, dgst_len.contents, sig,
-                                     siglen.contents, key)) != 1:
-                raise Exception("[OpenSSL] ECDSA_verify FAIL ... " + OpenSSL.get_error())
 
-            return sig.raw[0:siglen.contents.value]
+            OpenSSL.ECDSA_sign(0, digest, dgst_len.contents, sig, siglen, key)
+
+            if der:
+                if (OpenSSL.ECDSA_verify(0, digest, dgst_len.contents, sig,
+                                         siglen.contents, key)) != 1:
+                    raise Exception("[OpenSSL] ECDSA_verify FAIL ... " + OpenSSL.get_error())
+                return sig.raw[0:siglen.contents.value]
+            else:
+                ecdsa_sig = OpenSSL.ECDSA_do_sign(digest, dgst_len.contents, key)
+                if (OpenSSL.ECDSA_do_verify(digest, dgst_len.contents, ecdsa_sig, key)) != 1:
+                     raise Exception("[OpenSSL] ECDSA_verify FAIL ... " + OpenSSL.get_error())
+                # ecdsa_sig = OpenSSL.d2i_ECDSA_SIG(None, OpenSSL.byref(OpenSSL.pointer(sig)), siglen.contents.value)
+                sig = OpenSSL.cast(ecdsa_sig, OpenSSL.POINTER(OpenSSL.ECDSA_SIG))
+                R = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(sig.contents.r))
+                S = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(sig.contents.s))
+                OpenSSL.BN_bn2bin(sig.contents.r, R)
+                OpenSSL.BN_bn2bin(sig.contents.s, S)
+                return R.raw + S.raw
 
         finally:
             OpenSSL.EC_KEY_free(key)
@@ -434,18 +572,12 @@ class ECC:
             OpenSSL.EC_POINT_free(pub_key)
             OpenSSL.EVP_MD_CTX_destroy(md_ctx)
 
-    def verify(self, sig, inputb):
+    def verify(self, sig, inputb=None, input_digest=None, der=1):
         """
         Verify the signature with the input and the local public key.
         Returns a boolean
         """
         try:
-            bsig = OpenSSL.malloc(sig, len(sig))
-            binputb = OpenSSL.malloc(inputb, len(inputb))
-            digest = OpenSSL.malloc(0, 64)
-            dgst_len = OpenSSL.pointer(OpenSSL.c_int(0))
-            md_ctx = OpenSSL.EVP_MD_CTX_create()
-
             key = OpenSSL.EC_KEY_new_by_curve_name(self.curve)
 
             if key == 0:
@@ -467,22 +599,52 @@ class ECC:
             if (OpenSSL.EC_KEY_check_key(key)) == 0:
                 raise Exception("[OpenSSL] EC_KEY_check_key FAIL ... " + OpenSSL.get_error())
 
-            OpenSSL.EVP_MD_CTX_init(md_ctx)
-            OpenSSL.EVP_DigestInit_ex(md_ctx, OpenSSL.EVP_sha256(), None)
-            if (OpenSSL.EVP_DigestUpdate(md_ctx, binputb, len(inputb))) == 0:
-                raise Exception("[OpenSSL] EVP_DigestUpdate FAIL ... " + OpenSSL.get_error())
+            if input_digest is None:
+                binputb = OpenSSL.malloc(inputb, len(inputb))
+                digest = OpenSSL.malloc(0, 64)
+                dgst_len = OpenSSL.pointer(OpenSSL.c_int(0))
+                md_ctx = OpenSSL.EVP_MD_CTX_create()
+                OpenSSL.EVP_MD_CTX_init(md_ctx)
+                if self.hash == sha224:
+                    OpenSSL.EVP_DigestInit_ex(md_ctx, OpenSSL.EVP_sha224(), None)
+                if self.hash == sha256:
+                    OpenSSL.EVP_DigestInit_ex(md_ctx, OpenSSL.EVP_sha256(), None)
 
-            OpenSSL.EVP_DigestFinal_ex(md_ctx, digest, dgst_len)
-            ret = OpenSSL.ECDSA_verify(
-                0, digest, dgst_len.contents, bsig, len(sig), key)
+                if (OpenSSL.EVP_DigestUpdate(md_ctx, binputb, len(inputb))) == 0:
+                    raise Exception("[OpenSSL] EVP_DigestUpdate FAIL ... " + OpenSSL.get_error())
+
+                OpenSSL.EVP_DigestFinal_ex(md_ctx, digest, dgst_len)
+            else:
+                digest = OpenSSL.malloc(input_digest, len(input_digest))
+                dgst_len = OpenSSL.pointer(OpenSSL.c_int(len(input_digest)))
+
+            if der:
+                bsig = OpenSSL.malloc(sig, len(sig))
+                ret = OpenSSL.ECDSA_verify(
+                    0, digest, dgst_len.contents, bsig, len(sig), key)
+            else:
+                R = sig[:len(sig)/2]
+                S = sig[len(sig)/2:]
+                ecdsa_sig = OpenSSL.ECDSA_SIG()
+                r = OpenSSL.BN_bin2bn(OpenSSL.malloc(R, len(R)), len(R), 0)
+                s = OpenSSL.BN_bin2bn(OpenSSL.malloc(S, len(S)), len(S), 0)
+                ecdsa_sig.r = OpenSSL.cast(r, OpenSSL.POINTER(OpenSSL.BignumType))
+                ecdsa_sig.s = OpenSSL.cast(s, OpenSSL.POINTER(OpenSSL.BignumType))
+                sig = OpenSSL.byref(ecdsa_sig)
+                # bsig = OpenSSL.malloc(0, 151)
+                # l = OpenSSL.i2d_ECDSA_SIG(sig, OpenSSL.byref(OpenSSL.pointer(bsig)))
+                # print "bsig: ", l, bsig.raw[0:l]
+                # ret = OpenSSL.ECDSA_verify(0, digest, dgst_len.contents, bsig, l, key)
+                ret = OpenSSL.ECDSA_do_verify(digest, dgst_len.contents, sig, key)
 
             if ret == -1:
                 return False  # Fail to Check
             else:
                 if ret == 0:
                     return False  # Bad signature !
-                else:
+                if ret == 1:
                     return True  # Good
+
             return False
 
         finally:
@@ -490,7 +652,11 @@ class ECC:
             OpenSSL.BN_free(pub_key_x)
             OpenSSL.BN_free(pub_key_y)
             OpenSSL.EC_POINT_free(pub_key)
-            OpenSSL.EVP_MD_CTX_destroy(md_ctx)
+            if not der:
+                OpenSSL.BN_free(r)
+                OpenSSL.BN_free(s)
+            if input_digest is None:
+                OpenSSL.EVP_MD_CTX_destroy(md_ctx)
 
     def encrypt(self, data, pubkey, ephemcurve=None, ciphername='aes-256-cbc'):
         """
@@ -499,39 +665,96 @@ class ECC:
         curve = OpenSSL.get_curve_by_id(self.curve)
         pubkey_x, pubkey_y = ECC._decode_pubkey(pubkey)
         return ECC.raw_encrypt(data, pubkey_x, pubkey_y, curve=curve,
-                               ephemcurve=ephemcurve, ciphername=ciphername)
+                               ephemcurve=ephemcurve, ciphername=ciphername, hash=self.hash)
 
     @staticmethod
     def raw_encrypt(data, pubkey_x, pubkey_y, curve='sect283r1',
-                    ephemcurve=None, ciphername='aes-256-cbc'):
+                    ephemcurve=None, ciphername='aes-256-cbc', hash=sha512):
+        if type(hash) == str:
+            hash = globals()[hash]
+
         if ephemcurve is None:
             ephemcurve = curve
-        ephem = ECC(curve=ephemcurve)
-        key = sha512(ephem.raw_get_ecdh_key(pubkey_x, pubkey_y)).digest()
-        key_e, key_m = key[:32], key[32:]
+        ephem = ECC(curve=ephemcurve, hash=hash)
+
         pubkey = ephem.get_pubkey()
-        iv = Cipher.gen_IV(ciphername)
-        ctx = Cipher(key_e, iv, 1, ciphername)
-        ciphertext = iv + pubkey + ctx.ciphering(data)
-        mac = hmac_sha256(key_m, ciphertext)
-        return ciphertext + mac
+        if ciphername == 'stream-cipher':
+            # Received Data is a Octet String
+            l = len(data)/2
+            #print 'data: ', data, len(data)
+            key = ECC.kdf2(ephem.raw_get_ecdh_key(pubkey_x, pubkey_y), l + 32, hash)
+            key_e, key_m = key[:l], key[l:]
+            #print 'key_e ', key_e, ', key_m ', key_m
+            ciphertext = unhexlify('%x' % (int(data, 16) ^ int(hexlify(key_e), 16)))
+            #ciphertext = ''.join(chr(ord(a) ^ ord(b)) for a,b in zip(data, key_e))
+            #print 'ciphertext ', ciphertext, len(ciphertext)
+            mac = hmac_sha256(key_m, ciphertext, 160)
+            return pubkey + ciphertext + mac
+        else:
+            key = sha512(ephem.raw_get_ecdh_key(pubkey_x, pubkey_y)).digest()
+            key_e, key_m = key[:32], key[32:]
+            iv = Cipher.gen_IV(ciphername)
+            ctx = Cipher(key_e, iv, 1, ciphername)
+            ciphertext = iv + pubkey + ctx.ciphering(data)
+            mac = hmac_sha256(key_m, ciphertext)
+            return ciphertext + mac
 
     def decrypt(self, data, ciphername='aes-256-cbc'):
         """
         Decrypt data with ECIES method using the local private key
         """
-        blocksize = OpenSSL.get_cipher(ciphername).get_blocksize()
-        iv = data[:blocksize]
-        i = blocksize
-        coord_len = len(self.pubkey_x) * 2 + 1
-        pubkey_x, pubkey_y = ECC._decode_pubkey(data[i:i + coord_len])
-        i += coord_len
-        ciphertext = data[i:len(data) - 32]
-        i = len(data) - 32
-        mac = data[i:]
-        key = sha512(self.raw_get_ecdh_key(pubkey_x, pubkey_y)).digest()
-        key_e, key_m = key[:32], key[32:]
-        if not equals(hmac_sha256(key_m, data[:i]), mac):
-            raise RuntimeError("Fail to verify data")
-        ctx = Cipher(key_e, iv, 0, ciphername)
-        return ctx.ciphering(ciphertext)
+        if ciphername != 'stream-cipher':
+            blocksize = OpenSSL.get_cipher(ciphername).get_blocksize()
+            iv = data[:blocksize]
+            i = blocksize
+            coord_len = len(self.pubkey_x) * 2 + 1
+            pubkey_x, pubkey_y = ECC._decode_pubkey(data[i:i + coord_len])
+            i += coord_len
+            ciphertext = data[i:len(data) - 32]
+            i = len(data) - 32
+            mac = data[i:]
+            key = sha512(self.raw_get_ecdh_key(pubkey_x, pubkey_y)).digest()
+            key_e, key_m = key[:32], key[32:]
+            if not equals(hmac_sha256(key_m, data[:i]), mac):
+                raise RuntimeError("Fail to verify data")
+            ctx = Cipher(key_e, iv, 0, ciphername)
+            return ctx.ciphering(ciphertext)
+        else:
+            i = 0
+            coord_len = len(self.pubkey_x) * 2 + 1
+            pubkey_x, pubkey_y = ECC._decode_pubkey(data[i:i + coord_len])
+            i += coord_len
+            ciphertext = data[i:len(data) - 20]
+            i = len(data) - 20
+            mac = data[i:]
+            l = len(ciphertext)
+            key = ECC.kdf2(self.raw_get_ecdh_key(pubkey_x, pubkey_y), l + 32, self.hash)
+            key_e, key_m = key[:l], key[l:]
+            #print 'key_e ', key_e, ', key_m ', key_m
+            #print 'ciphertext ', ciphertext
+            if not equals(hmac_sha256(key_m, ciphertext, 160), mac):
+                raise RuntimeError("Fail to verify data")
+            #return ''.join(chr(ord(a) ^ ord(b)) for a,b in zip(ciphertext, key_e))
+            return unhexlify('%x' % (int(hexlify(ciphertext), 16) ^ int(hexlify(key_e), 16)))
+
+    @staticmethod
+    def kdf2(z, olen, hash):
+        zb= bin(int(hexlify(z), 16))[2:].zfill(256)
+        mb = ''
+        zbits = len(zb)
+        obits = 8*olen
+        hbits = 256  # can change based on hash
+        cthreshold = ceil(obits/float(hbits))
+        counter = 1
+        while counter <= cthreshold:
+            cb = bin(counter)[2:].zfill(32)
+            zcb = unhexlify(format(int(zb+cb, 2), '072x'))  # unhexlify('%x' % int(zb+cb, 2))
+            h = hash(zcb).digest()
+            hb = bin(int(hexlify(h), 16))[2:].zfill(256)
+            mb += hb
+            counter += 1
+        #print 'mb len ', len(mb)
+        kb = mb[:obits]
+        k = unhexlify(format(int(kb, 2), '0'+str(obits/4)+'x'))
+        #print 'k: ', k, len(k)
+        return k
