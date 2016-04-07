@@ -37,6 +37,7 @@ from .hash import hmac_sha256, equals
 from .arithmetic import hash_160
 from struct import pack, unpack
 from math import ceil
+from datetime import datetime, timedelta
 
 
 class ECC:
@@ -75,6 +76,7 @@ class ECC:
         For a normal and High level use, specifie pubkey,
         privkey (if you need) and the curve
         """
+        # t1 = datetime.now()
         if type(curve) == str:
             self.curve = OpenSSL.get_curve(curve)
         else:
@@ -94,6 +96,8 @@ class ECC:
             self._set_keys(pubkey_x, pubkey_y, raw_privkey)
         else:
             self.privkey, self.pubkey_x, self.pubkey_y = self._generate()
+        # t2 = datetime.now()
+        # print 'Pyelliptic ECC:', (t2 - t1).microseconds
 
     def _set_keys(self, pubkey_x, pubkey_y, privkey):
         if self.raw_check_key(privkey, pubkey_x, pubkey_y) < 0:
@@ -105,6 +109,20 @@ class ECC:
             self.pubkey_x = pubkey_x
             self.pubkey_y = pubkey_y
             self.privkey = privkey
+
+    @staticmethod
+    def get_order(curve):
+        try:
+            if type(curve) == str:
+                curve = OpenSSL.get_curve(curve)
+
+            m = OpenSSL.BN_new()
+            OpenSSL.EC_GROUP_get_order(OpenSSL.EC_GROUP_new_by_curve_name(curve), m, 0)
+            m_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(m))
+            OpenSSL.BN_bn2bin(m, m_bin)
+            return m_bin.raw
+        finally:
+            OpenSSL.BN_free(m)
 
     @staticmethod
     def get_curves():
@@ -218,120 +236,6 @@ class ECC:
         i += tmplen
         return curve, privkey, i
 
-    @staticmethod
-    def point_add(curve, p1_x, p1_y, p2_x, p2_y):
-        try:
-            p1_x = OpenSSL.BN_bin2bn(p1_x, len(p1_x), 0)
-            p1_y = OpenSSL.BN_bin2bn(p1_y, len(p1_y), 0)
-            p2_x = OpenSSL.BN_bin2bn(p2_x, len(p2_x), 0)
-            p2_y = OpenSSL.BN_bin2bn(p2_y, len(p2_y), 0)
-            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
-            if group == 0:
-                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
-
-            r = OpenSSL.EC_POINT_new(group)
-            a = OpenSSL.EC_POINT_new(group)
-            b = OpenSSL.EC_POINT_new(group)
-            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, a, p1_x, p1_y, 0)) == 0:
-                raise Exception(
-                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
-            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, b, p2_x, p2_y, 0)) == 0:
-                raise Exception(
-                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
-
-            OpenSSL.EC_POINT_add(group, r, a, b, 0)
-            x = OpenSSL.BN_new()
-            y = OpenSSL.BN_new()
-            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, r, x, y, 0)) == 0:
-                raise Exception(
-                    "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
-            x_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(x))
-            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
-            OpenSSL.BN_bn2bin(x, x_bin)
-            OpenSSL.BN_bn2bin(y, y_bin)
-            return x_bin.raw, y_bin.raw
-
-        finally:
-            OpenSSL.EC_KEY_free(key)
-            OpenSSL.EC_POINT_free(r)
-            OpenSSL.EC_POINT_free(a)
-            OpenSSL.EC_POINT_free(b)
-            OpenSSL.BN_free(x)
-            OpenSSL.BN_free(y)
-
-    @staticmethod
-    def point_mul(curve, n, point_x, point_y):
-        try:
-            m = OpenSSL.BN_new()
-            OpenSSL.BN_dec2bn(OpenSSL.byref(OpenSSL.pointer(m)), str(n))
-
-            point_x = OpenSSL.BN_bin2bn(point_x, len(point_x), 0)
-            point_y = OpenSSL.BN_bin2bn(point_y, len(point_y), 0)
-
-            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
-            if group == 0:
-                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
-
-            r = OpenSSL.EC_POINT_new(group)
-            q = OpenSSL.EC_POINT_new(group)
-            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, q, point_x, point_y, 0)) == 0:
-                raise Exception(
-                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
-
-            OpenSSL.EC_POINT_mul(group, r, 0, q, m, 0)
-            x = OpenSSL.BN_new()
-            y = OpenSSL.BN_new()
-            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, r, x, y, 0)) == 0:
-                raise Exception(
-                    "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
-            x_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(x))
-            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
-            OpenSSL.BN_bn2bin(x, x_bin)
-            OpenSSL.BN_bn2bin(y, y_bin)
-            return x_bin.raw, y_bin.raw
-
-        finally:
-            OpenSSL.EC_GROUP_free(group)
-            OpenSSL.EC_POINT_free(r)
-            OpenSSL.EC_POINT_free(q)
-            OpenSSL.BN_free(m)
-            OpenSSL.BN_free(x)
-            OpenSSL.BN_free(y)
-
-    @staticmethod
-    def uncompress_ecpoint(curve, x, y_lsb):
-        """
-        Derives y coordinate of a compressed ec point using x and y_lsb
-        """
-        try:
-            x = OpenSSL.BN_bin2bn(x, len(x), 0)
-            y = OpenSSL.BN_new()
-
-            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
-            if group == 0:
-                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
-
-            pub_key = OpenSSL.EC_POINT_new(group)
-            if (OpenSSL.EC_POINT_set_compressed_coordinates_GFp(group, pub_key,
-                                                                x, y_lsb, 0)) == 0:
-                    raise Exception(
-                        "[OpenSSL] EC_POINT_set_compressed_coordinates_GFp FAIL ... " + OpenSSL.get_error())
-            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, pub_key,
-                                                                x, y, 0)) == 0:
-                    raise Exception(
-                        "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
-
-            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
-            OpenSSL.BN_bn2bin(y, y_bin)
-
-            return y_bin.raw
-
-        finally:
-            OpenSSL.EC_GROUP_free(group)
-            OpenSSL.EC_POINT_free(pub_key)
-            OpenSSL.BN_free(x)
-            OpenSSL.BN_free(y)
-
     def _generate(self):
         try:
             pub_key_x = OpenSSL.BN_new()
@@ -391,7 +295,7 @@ class ECC:
         pubkey_x, pubkey_y = ECC._decode_pubkey(pubkey, format)
         return self.raw_get_ecdh_key(pubkey_x, pubkey_y)
 
-    def raw_get_ecdh_key(self, pubkey_x, pubkey_y):
+    def raw_get_ecdh_key(self, pubkey_x, pubkey_y, cofactor=0):
         try:
             ecdh_keybuffer = OpenSSL.malloc(0, 32)
 
@@ -424,6 +328,10 @@ class ECC:
                 raise Exception("[OpenSSL] EC_KEY_new_by_curve_name FAIL ... " + OpenSSL.get_error())
             own_priv_key = OpenSSL.BN_bin2bn(
                 self.privkey, len(self.privkey), 0)
+
+            # Cofactor Multiplication (required for ECSVDP-DHC)
+            if cofactor:
+                OpenSSL.EC_KEY_set_flags(own_key, OpenSSL.EC_KEY_set_flags(own_key) | OpenSSL.EC_FLAG_COFACTOR_ECDH)
 
             if (OpenSSL.EC_KEY_set_private_key(own_key, own_priv_key)) == 0:
                 raise Exception("[OpenSSL] EC_KEY_set_private_key FAIL ... " + OpenSSL.get_error())
@@ -465,6 +373,7 @@ class ECC:
                 raise Exception("[OpenSSL] EC_KEY_new_by_curve_name FAIL ... " + OpenSSL.get_error())
             if privkey is not None:
                 priv_key = OpenSSL.BN_bin2bn(privkey, len(privkey), 0)
+
             pub_key_x = OpenSSL.BN_bin2bn(pubkey_x, len(pubkey_x), 0)
             pub_key_y = OpenSSL.BN_bin2bn(pubkey_y, len(pubkey_y), 0)
 
@@ -495,6 +404,173 @@ class ECC:
             OpenSSL.EC_POINT_free(pub_key)
             if privkey is not None:
                 OpenSSL.BN_free(priv_key)
+
+    @staticmethod
+    def Bignum_modulo_add(a, b, curve):
+        try:
+            if type(curve) == str:
+                curve = OpenSSL.get_curve(curve)
+
+            ctx = OpenSSL.BN_CTX_new()
+            a = OpenSSL.BN_bin2bn(a, len(a), 0)
+            b = OpenSSL.BN_bin2bn(b, len(b), 0)
+            m = OpenSSL.BN_new()
+            OpenSSL.EC_GROUP_get_order(OpenSSL.EC_GROUP_new_by_curve_name(curve), m, 0)
+            r = OpenSSL.BN_new()
+
+            OpenSSL.BN_mod_add(r, a, b, m, ctx)
+            r_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(r))
+            OpenSSL.BN_bn2bin(r, r_bin)
+            return r_bin.raw
+        finally:
+            OpenSSL.BN_free(a)
+            OpenSSL.BN_free(b)
+            OpenSSL.BN_free(m)
+            OpenSSL.BN_free(r)
+            OpenSSL.BN_CTX_free(ctx)
+
+    @staticmethod
+    def Bignum_modulo_mul(a, b, curve):
+        try:
+            if type(curve) == str:
+                curve = OpenSSL.get_curve(curve)
+            ctx = OpenSSL.BN_CTX_new()
+            a = OpenSSL.BN_bin2bn(a, len(a), 0)
+            b = OpenSSL.BN_bin2bn(b, len(b), 0)
+            m = OpenSSL.BN_new()
+            OpenSSL.EC_GROUP_get_order(OpenSSL.EC_GROUP_new_by_curve_name(curve), m, 0)
+            r = OpenSSL.BN_new()
+
+            OpenSSL.BN_mod_mul(r, a, b, m, ctx)
+            r_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(r))
+            OpenSSL.BN_bn2bin(r, r_bin)
+            return r_bin.raw
+        finally:
+            OpenSSL.BN_free(a)
+            OpenSSL.BN_free(b)
+            OpenSSL.BN_free(m)
+            OpenSSL.BN_free(r)
+            OpenSSL.BN_CTX_free(ctx)
+
+
+    @staticmethod
+    def point_add(curve, p1_x, p1_y, p2_x, p2_y):
+        try:
+            p1_x = OpenSSL.BN_bin2bn(p1_x, len(p1_x), 0)
+            p1_y = OpenSSL.BN_bin2bn(p1_y, len(p1_y), 0)
+            p2_x = OpenSSL.BN_bin2bn(p2_x, len(p2_x), 0)
+            p2_y = OpenSSL.BN_bin2bn(p2_y, len(p2_y), 0)
+            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
+            if group == 0:
+                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
+
+            r = OpenSSL.EC_POINT_new(group)
+            a = OpenSSL.EC_POINT_new(group)
+            b = OpenSSL.EC_POINT_new(group)
+            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, a, p1_x, p1_y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
+            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, b, p2_x, p2_y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
+
+            OpenSSL.EC_POINT_add(group, r, a, b, 0)
+            x = OpenSSL.BN_new()
+            y = OpenSSL.BN_new()
+            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, r, x, y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+            x_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(x))
+            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
+            OpenSSL.BN_bn2bin(x, x_bin)
+            OpenSSL.BN_bn2bin(y, y_bin)
+            return x_bin.raw, y_bin.raw
+
+        finally:
+        #    OpenSSL.EC_GROUP_free(group)
+            OpenSSL.EC_POINT_free(r)
+            OpenSSL.EC_POINT_free(a)
+            OpenSSL.EC_POINT_free(b)
+            OpenSSL.BN_free(p1_x)
+            OpenSSL.BN_free(p1_y)
+            OpenSSL.BN_free(p2_x)
+            OpenSSL.BN_free(p2_y)
+            OpenSSL.BN_free(x)
+            OpenSSL.BN_free(y)
+
+    @staticmethod
+    def point_mul(curve, n, point_x, point_y):
+        try:
+            m = OpenSSL.BN_bin2bn(n, len(n), 0)
+
+            point_x = OpenSSL.BN_bin2bn(point_x, len(point_x), 0)
+            point_y = OpenSSL.BN_bin2bn(point_y, len(point_y), 0)
+
+            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
+            if group == 0:
+                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
+
+            r = OpenSSL.EC_POINT_new(group)
+            q = OpenSSL.EC_POINT_new(group)
+            if (OpenSSL.EC_POINT_set_affine_coordinates_GFp(group, q, point_x, point_y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_set_affine_coordinates_GFp FAIL ..." + OpenSSL.get_error())
+
+            OpenSSL.EC_POINT_mul(group, r, 0, q, m, 0)
+            x = OpenSSL.BN_new()
+            y = OpenSSL.BN_new()
+            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, r, x, y, 0)) == 0:
+                raise Exception(
+                    "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+            x_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(x))
+            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
+            OpenSSL.BN_bn2bin(x, x_bin)
+            OpenSSL.BN_bn2bin(y, y_bin)
+            return x_bin.raw, y_bin.raw
+
+        finally:
+        #    OpenSSL.EC_GROUP_free(group)
+            OpenSSL.EC_POINT_free(r)
+            OpenSSL.EC_POINT_free(q)
+            OpenSSL.BN_free(point_x)
+            OpenSSL.BN_free(point_y)
+            OpenSSL.BN_free(m)
+            OpenSSL.BN_free(x)
+            OpenSSL.BN_free(y)
+
+    @staticmethod
+    def uncompress_ecpoint(curve, x, y_lsb):
+        """
+        Derives y coordinate of a compressed ec point using x and y_lsb
+        """
+        try:
+            x = OpenSSL.BN_bin2bn(x, len(x), 0)
+            y = OpenSSL.BN_new()
+
+            group = OpenSSL.EC_GROUP_new_by_curve_name(OpenSSL.get_curve(curve))
+            if group == 0:
+                raise Exception("[OpenSSL] EC_GROUP_new_by_curve_name FAIL ... " + OpenSSL.get_error())
+
+            pub_key = OpenSSL.EC_POINT_new(group)
+            if (OpenSSL.EC_POINT_set_compressed_coordinates_GFp(group, pub_key,
+                                                                x, y_lsb, 0)) == 0:
+                    raise Exception(
+                        "[OpenSSL] EC_POINT_set_compressed_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+            if (OpenSSL.EC_POINT_get_affine_coordinates_GFp(group, pub_key,
+                                                                x, y, 0)) == 0:
+                    raise Exception(
+                        "[OpenSSL] EC_POINT_get_affine_coordinates_GFp FAIL ... " + OpenSSL.get_error())
+
+            y_bin = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(y))
+            OpenSSL.BN_bn2bin(y, y_bin)
+
+            return y_bin.raw
+
+        finally:
+            OpenSSL.EC_GROUP_free(group)
+            OpenSSL.EC_POINT_free(pub_key)
+            OpenSSL.BN_free(x)
+            OpenSSL.BN_free(y)
 
     def sign(self, inputb, der=1):
         """
@@ -675,6 +751,7 @@ class ECC:
 
         if ephemcurve is None:
             ephemcurve = curve
+        # print 'Ephem curve'
         ephem = ECC(curve=ephemcurve, hash=hash)
 
         pubkey = ephem.get_pubkey()
@@ -682,12 +759,11 @@ class ECC:
             # Received Data is a Octet String
             l = len(data)/2
             #print 'data: ', data, len(data)
-            key = ECC.kdf2(ephem.raw_get_ecdh_key(pubkey_x, pubkey_y), l + 32, hash)
+            key = ECC.kdf2(ephem.raw_get_ecdh_key(pubkey_x, pubkey_y, cofactor=1), l + 32, hash)
             key_e, key_m = key[:l], key[l:]
-            #print 'key_e ', key_e, ', key_m ', key_m
-            ciphertext = unhexlify('%x' % (int(data, 16) ^ int(hexlify(key_e), 16)))
-            #ciphertext = ''.join(chr(ord(a) ^ ord(b)) for a,b in zip(data, key_e))
-            #print 'ciphertext ', ciphertext, len(ciphertext)
+            #print 'key_e ', key_e, ', key_m ', key_mt
+            ciphertext = unhexlify(format(int(data, 16) ^ int(hexlify(key_e), 16), '0'+str(len(data))+'x'))
+            #print ciphertext
             mac = hmac_sha256(key_m, ciphertext, 160)
             return pubkey + ciphertext + mac
         else:
@@ -728,14 +804,14 @@ class ECC:
             i = len(data) - 20
             mac = data[i:]
             l = len(ciphertext)
-            key = ECC.kdf2(self.raw_get_ecdh_key(pubkey_x, pubkey_y), l + 32, self.hash)
+            key = ECC.kdf2(self.raw_get_ecdh_key(pubkey_x, pubkey_y, cofactor=1), l + 32, self.hash)
             key_e, key_m = key[:l], key[l:]
             #print 'key_e ', key_e, ', key_m ', key_m
             #print 'ciphertext ', ciphertext
             if not equals(hmac_sha256(key_m, ciphertext, 160), mac):
                 raise RuntimeError("Fail to verify data")
-            #return ''.join(chr(ord(a) ^ ord(b)) for a,b in zip(ciphertext, key_e))
-            return unhexlify('%x' % (int(hexlify(ciphertext), 16) ^ int(hexlify(key_e), 16)))
+
+            return unhexlify(format(int(hexlify(ciphertext), 16) ^ int(hexlify(key_e), 16), '0'+str(2*len(ciphertext))+'x'))
 
     @staticmethod
     def kdf2(z, olen, hash):
@@ -756,5 +832,5 @@ class ECC:
         #print 'mb len ', len(mb)
         kb = mb[:obits]
         k = unhexlify(format(int(kb, 2), '0'+str(obits/4)+'x'))
-        #print 'k: ', k, len(k)
+        # print 'k: ', k, len(k)
         return k

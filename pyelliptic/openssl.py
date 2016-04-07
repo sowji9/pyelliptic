@@ -120,6 +120,16 @@ class _OpenSSL:
         self.BN_mul.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
                                 ctypes.c_void_p, ctypes.c_void_p]
 
+        self.BN_mod_add = self._lib.BN_mod_add
+        self.BN_mod_add.restype = ctypes.c_int
+        self.BN_mod_add.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+
+        self.BN_mod_mul = self._lib.BN_mod_mul
+        self.BN_mod_mul.restype = ctypes.c_int
+        self.BN_mod_mul.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+
         self.BN_free = self._lib.BN_free
         self.BN_free.restype = None
         self.BN_free.argtypes = [ctypes.c_void_p]
@@ -141,6 +151,11 @@ class _OpenSSL:
         self.BN_dec2bn.restype = ctypes.c_void_p
         self.BN_dec2bn.argtypes = [ctypes.c_void_p,
                                    ctypes.c_void_p]
+
+        self.EC_GROUP_get_order = self._lib.EC_GROUP_get_order
+        self.EC_GROUP_get_order.restype = ctypes.c_int
+        self.EC_GROUP_get_order.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_void_p]
 
         self.EC_GROUP_get_degree = self._lib.EC_GROUP_get_degree
         self.EC_GROUP_get_degree.restype = ctypes.c_int
@@ -182,6 +197,10 @@ class _OpenSSL:
         self.EC_KEY_get0_group.restype = ctypes.c_void_p
         self.EC_KEY_get0_group.argtypes = [ctypes.c_void_p]
 
+        self.EC_KEY_get_flags = self._lib.EC_KEY_get_flags
+        self.EC_KEY_get_flags.restype = ctypes.c_int
+        self.EC_KEY_get_flags.argtypes = [ctypes.c_void_p]
+
         self.EC_POINT_get_affine_coordinates_GFp = self._lib.EC_POINT_get_affine_coordinates_GFp
         self.EC_POINT_get_affine_coordinates_GFp.restype = ctypes.c_int
         self.EC_POINT_get_affine_coordinates_GFp.argtypes = 5 * [ctypes.c_void_p]
@@ -199,6 +218,12 @@ class _OpenSSL:
         self.EC_KEY_set_group = self._lib.EC_KEY_set_group
         self.EC_KEY_set_group.restype = ctypes.c_int
         self.EC_KEY_set_group.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+        self.EC_KEY_set_flags = self._lib.EC_KEY_set_flags
+        self.EC_KEY_set_flags.restype = None
+        self.EC_KEY_set_flags.argtypes = [ctypes.c_void_p, ctypes.c_int]
+
+        self.EC_FLAG_COFACTOR_ECDH = self._lib.EC_FLAG_COFACTOR_ECDH
 
         self.EC_POINT_set_compressed_coordinates_GFp = self._lib.EC_POINT_set_compressed_coordinates_GFp
         self.EC_POINT_set_compressed_coordinates_GFp.restype = ctypes.c_int
