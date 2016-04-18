@@ -223,7 +223,7 @@ class _OpenSSL:
         self.EC_KEY_set_flags.restype = None
         self.EC_KEY_set_flags.argtypes = [ctypes.c_void_p, ctypes.c_int]
 
-        self.EC_FLAG_COFACTOR_ECDH = self._lib.EC_FLAG_COFACTOR_ECDH
+        self.EC_FLAG_COFACTOR_ECDH = 0x1000
 
         self.EC_POINT_set_compressed_coordinates_GFp = self._lib.EC_POINT_set_compressed_coordinates_GFp
         self.EC_POINT_set_compressed_coordinates_GFp.restype = ctypes.c_int

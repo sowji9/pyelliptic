@@ -331,7 +331,7 @@ class ECC:
 
             # Cofactor Multiplication (required for ECSVDP-DHC)
             if cofactor:
-                OpenSSL.EC_KEY_set_flags(own_key, OpenSSL.EC_KEY_set_flags(own_key) | OpenSSL.EC_FLAG_COFACTOR_ECDH)
+                OpenSSL.EC_KEY_set_flags(own_key, OpenSSL.EC_KEY_get_flags(own_key) | OpenSSL.EC_FLAG_COFACTOR_ECDH)
 
             if (OpenSSL.EC_KEY_set_private_key(own_key, own_priv_key)) == 0:
                 raise Exception("[OpenSSL] EC_KEY_set_private_key FAIL ... " + OpenSSL.get_error())
