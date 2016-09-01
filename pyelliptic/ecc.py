@@ -621,9 +621,8 @@ class ECC:
                 raise Exception("[OpenSSL] EVP_DigestUpdate FAIL ... " + OpenSSL.get_error())
             OpenSSL.EVP_DigestFinal_ex(md_ctx, digest, dgst_len)
 
-            OpenSSL.ECDSA_sign(0, digest, dgst_len.contents, sig, siglen, key)
-
             if der:
+                OpenSSL.ECDSA_sign(0, digest, dgst_len.contents, sig, siglen, key)
                 if (OpenSSL.ECDSA_verify(0, digest, dgst_len.contents, sig,
                                          siglen.contents, key)) != 1:
                     raise Exception("[OpenSSL] ECDSA_verify FAIL ... " + OpenSSL.get_error())
@@ -634,11 +633,12 @@ class ECC:
                      raise Exception("[OpenSSL] ECDSA_verify FAIL ... " + OpenSSL.get_error())
                 # ecdsa_sig = OpenSSL.d2i_ECDSA_SIG(None, OpenSSL.byref(OpenSSL.pointer(sig)), siglen.contents.value)
                 sig = OpenSSL.cast(ecdsa_sig, OpenSSL.POINTER(OpenSSL.ECDSA_SIG))
+                # print OpenSSL.BN_num_bytes(sig.contents.r), OpenSSL.BN_num_bytes(sig.contents.s)
                 R = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(sig.contents.r))
                 S = OpenSSL.malloc(0, OpenSSL.BN_num_bytes(sig.contents.s))
                 OpenSSL.BN_bn2bin(sig.contents.r, R)
                 OpenSSL.BN_bn2bin(sig.contents.s, S)
-                return R.raw + S.raw
+                return R.raw, S.raw
 
         finally:
             OpenSSL.EC_KEY_free(key)
@@ -699,8 +699,7 @@ class ECC:
                 ret = OpenSSL.ECDSA_verify(
                     0, digest, dgst_len.contents, bsig, len(sig), key)
             else:
-                R = sig[:len(sig)/2]
-                S = sig[len(sig)/2:]
+                [R, S] = sig
                 ecdsa_sig = OpenSSL.ECDSA_SIG()
                 r = OpenSSL.BN_bin2bn(OpenSSL.malloc(R, len(R)), len(R), 0)
                 s = OpenSSL.BN_bin2bn(OpenSSL.malloc(S, len(S)), len(S), 0)
