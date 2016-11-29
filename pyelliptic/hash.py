@@ -67,12 +67,7 @@ def hmac_sha256(k, m, tBits=256):
     md = OpenSSL.malloc(0, 32)
     i = OpenSSL.pointer(OpenSSL.c_int(0))
     OpenSSL.HMAC(OpenSSL.EVP_sha256(), key, len(k), d, len(m), md, i)
-    if tBits == 160:
-        ripemd160 = hashlib.new('ripemd160')
-        ripemd160.update(md.raw)
-        return ripemd160.digest()
-    else:
-        return md.raw
+    return md.raw[:20]
 
 
 def hmac_sha512(k, m):
