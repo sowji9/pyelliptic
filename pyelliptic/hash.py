@@ -67,7 +67,7 @@ def hmac_sha256(k, m, tBits=256):
     md = OpenSSL.malloc(0, 32)
     i = OpenSSL.pointer(OpenSSL.c_int(0))
     OpenSSL.HMAC(OpenSSL.EVP_sha256(), key, len(k), d, len(m), md, i)
-    return md.raw[:20]
+    return md.raw[:(tBits/8)]
 
 
 def hmac_sha512(k, m):
